@@ -78,7 +78,8 @@ class FsStandardFontDataFactory {
     }
     const url = `${this.baseUrl}${filename}`;
     const filePath = url.startsWith('file:') ? fileURLToPath(url) : url;
-    return new Uint8Array(fs.readFileSync(filePath));
+    const buffer = await fs.promises.readFile(filePath);
+    return new Uint8Array(buffer);
   }
 }
 
@@ -113,8 +114,7 @@ export async function loadPdf(pdfPath: string, scale: number): Promise<LoadedPdf
       data,
       disableFontFace: true,
       standardFontDataUrl,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      StandardFontDataFactory: FsStandardFontDataFactory as any,
+      StandardFontDataFactory: FsStandardFontDataFactory,
     });
     document = await loadingTask.promise;
   } catch (err) {
