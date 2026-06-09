@@ -87,7 +87,8 @@ const options: ConversionOptions = {
 
 const result = await convertPdfToTiff('document.pdf', './output', options);
 console.log(result.outputFiles);
-// → ['./output/scan-1.tiff', './output/scan-2.tiff', ...]
+// Multi-page: → ['./output/scan-1.tiff', './output/scan-2.tiff', ...]
+// Single-page: → ['./output/scan.tiff']
 ```
 
 ---
@@ -136,7 +137,7 @@ type TiffCompression = 'none' | 'packbits' | 'lzw';
 |---------------|-------------------|------------|-------------|
 | `scale`       | `number`          | `1.5`      | Render scale multiplier. `1.0` = 72 DPI (PDF native), `2.0` = 144 DPI, `4.17` ≈ 300 DPI. Valid range: `(0, 10]`. |
 | `compression` | `TiffCompression` | `'lzw'`    | TIFF compression algorithm. See [Compression Modes](#compression-modes). |
-| `filePrefix`  | `string`          | `'page'`   | Output filename prefix. Files are named `${prefix}-${pageNumber}.tiff`. |
+| `filePrefix`  | `string`          | `'page'`   | Output filename prefix. **Single-page PDFs:** files are named `${prefix}.tiff` (no page number). **Multi-page PDFs:** files are named `${prefix}-${pageNumber}.tiff`. |
 
 ---
 
@@ -166,7 +167,22 @@ const result = await convertPdfToTiff('invoice.pdf', './tiff-output', {
   compression: 'lzw',
   filePrefix: 'invoice',
 });
-// → invoice-1.tiff, invoice-2.tiff, ...
+// Multi-page: → invoice-1.tiff, invoice-2.tiff, ...
+// Single-page: → invoice.tiff
+```
+
+### Output to current directory
+
+```js
+const { convertPdfToTiff } = require('pdf-to-tiff-pure-aloka');
+
+const result = await convertPdfToTiff('document.pdf', './', {
+  filePrefix: 'scan',
+});
+
+console.log(result.outputFiles);
+// Single-page: → ['scan.tiff']
+// Multi-page:  → ['scan-1.tiff', 'scan-2.tiff', ...]
 ```
 
 ### Uncompressed output (fastest, largest files)

@@ -5,6 +5,26 @@ import { convertPdfToTiff } from '../src/converter';
 const SAMPLE_PDF  = path.join(__dirname, 'samples', 'sample.pdf');
 const OUTPUT_DIR  = path.join(__dirname, 'output');
 
+/** Builds a minimal valid single-page PDF and writes it to a temp file. Returns the file path. */
+function createSinglePagePdf(outPath: string): void {
+  const content = ['q', '0.2 0.5 0.8 rg', '0 0 595 842 re f', 'Q'].join('\n');
+  const mediaBox = '[0 0 595 842]';
+  const objStrings = [
+    `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj`,
+    `2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj`,
+    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox ${mediaBox} /Contents 4 0 R /Resources << >> >>\nendobj`,
+    `4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj`,
+  ];
+  let body = '%PDF-1.4\n';
+  const bodyOffsets: number[] = [];
+  for (const s of objStrings) { bodyOffsets.push(body.length); body += s + '\n'; }
+  const xrefOffset = body.length;
+  let xref = `xref\n0 ${objStrings.length + 1}\n` + '0000000000 65535 f \n';
+  for (const off of bodyOffsets) xref += String(off).padStart(10, '0') + ' 00000 n \n';
+  const trailer = `trailer\n<< /Size ${objStrings.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  fs.writeFileSync(outPath, body + xref + trailer, 'ascii');
+}
+
 afterEach(() => {
   // Clean up any TIFF files created during tests
   if (fs.existsSync(OUTPUT_DIR)) {
@@ -35,21 +55,50 @@ describe('convertPdfToTiff — integration', () => {
     }
   }, 120_000);
 
-  it('default output filenames follow pattern page-N.tiff', async () => {
+  it('multi-page: default output filenames follow pattern page-N.tiff', async () => {
     const result = await convertPdfToTiff(SAMPLE_PDF, OUTPUT_DIR);
 
+    expect(result.totalPages).toBeGreaterThan(1);
     result.outputFiles.forEach((filePath, idx) => {
       const basename = path.basename(filePath);
       expect(basename).toBe(`page-${idx + 1}.tiff`);
     });
   }, 120_000);
 
-  it('respects custom filePrefix option', async () => {
+  it('single-page: default output filename has no page-number suffix', async () => {
+    const singlePagePdf = path.join(OUTPUT_DIR, '_single.pdf');
+    fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+    createSinglePagePdf(singlePagePdf);
+    try {
+      const result = await convertPdfToTiff(singlePagePdf, OUTPUT_DIR);
+      expect(result.totalPages).toBe(1);
+      expect(result.outputFiles).toHaveLength(1);
+      expect(path.basename(result.outputFiles[0])).toBe('page.tiff');
+    } finally {
+      fs.unlinkSync(singlePagePdf);
+    }
+  }, 120_000);
+
+  it('multi-page: respects custom filePrefix option', async () => {
     const result = await convertPdfToTiff(SAMPLE_PDF, OUTPUT_DIR, { filePrefix: 'doc' });
 
+    expect(result.totalPages).toBeGreaterThan(1);
     result.outputFiles.forEach((filePath, idx) => {
       expect(path.basename(filePath)).toBe(`doc-${idx + 1}.tiff`);
     });
+  }, 120_000);
+
+  it('single-page: custom filePrefix has no page-number suffix', async () => {
+    const singlePagePdf = path.join(OUTPUT_DIR, '_single.pdf');
+    fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+    createSinglePagePdf(singlePagePdf);
+    try {
+      const result = await convertPdfToTiff(singlePagePdf, OUTPUT_DIR, { filePrefix: 'scan' });
+      expect(result.totalPages).toBe(1);
+      expect(path.basename(result.outputFiles[0])).toBe('scan.tiff');
+    } finally {
+      fs.unlinkSync(singlePagePdf);
+    }
   }, 120_000);
 
   it('works with all three compression modes', async () => {

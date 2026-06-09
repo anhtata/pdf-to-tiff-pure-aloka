@@ -29,7 +29,8 @@ export interface ConversionOptions {
 
   /**
    * Optional prefix for output filenames.
-   * Output files will be named `${prefix}-${pageNumber}.tiff`.
+   * - Single-page PDF: output is named `${prefix}.tiff` (no page-number suffix).
+   * - Multi-page PDF: output files are named `${prefix}-${pageNumber}.tiff`.
    * Default: 'page'
    */
   filePrefix?: string;

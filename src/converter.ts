@@ -57,7 +57,8 @@ export async function convertPdfToTiff(
   let convertedPages = 0;
 
   for (let i = 1; i <= metadata.numPages; i++) {
-    const outputPath = path.join(absOutputDir, `${prefix}-${i}.tiff`);
+    const filename = metadata.numPages === 1 ? `${prefix}.tiff` : `${prefix}-${i}.tiff`;
+    const outputPath = path.join(absOutputDir, filename);
     try {
       // Step 1: Render PDF page → RGBA pixel buffer
       const pixels = await renderPageToPixels(document, i, scale);
