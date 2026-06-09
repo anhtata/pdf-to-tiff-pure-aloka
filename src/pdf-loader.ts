@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { pathToFileURL, fileURLToPath } from 'url';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import type { PdfMetadata, PageMetadata } from './types';
 
@@ -61,6 +62,27 @@ export interface LoadedPdf {
 }
 
 /**
+ * Custom StandardFontDataFactory that reads font files via `fs` rather than
+ * `fetch()`. Node.js `fetch()` (and the built-in `NodeStandardFontDataFactory`
+ * which uses `fs.readFile`) both fail on `file://` URL *strings*; this factory
+ * converts the URL to an actual file path with `fileURLToPath` first.
+ */
+class FsStandardFontDataFactory {
+  private readonly baseUrl: string | null;
+  constructor({ baseUrl = null }: { baseUrl?: string | null }) {
+    this.baseUrl = baseUrl;
+  }
+  async fetch({ filename }: { filename: string }): Promise<Uint8Array> {
+    if (!this.baseUrl) {
+      throw new Error('The standard font "baseUrl" parameter must be specified.');
+    }
+    const url = `${this.baseUrl}${filename}`;
+    const filePath = url.startsWith('file:') ? fileURLToPath(url) : url;
+    return new Uint8Array(fs.readFileSync(filePath));
+  }
+}
+
+/**
  * Loads a PDF file from disk and returns a PDFDocumentProxy plus metadata.
  * Throws a descriptive Error if the file cannot be read or parsed.
  */
@@ -84,7 +106,16 @@ export async function loadPdf(pdfPath: string, scale: number): Promise<LoadedPdf
 
   let document: PDFDocumentProxy;
   try {
-    const loadingTask = pdfjs.getDocument({ data, disableFontFace: true });
+    const standardFontDataUrl = pathToFileURL(
+      path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'standard_fonts') + path.sep
+    ).href;
+    const loadingTask = pdfjs.getDocument({
+      data,
+      disableFontFace: true,
+      standardFontDataUrl,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      StandardFontDataFactory: FsStandardFontDataFactory as any,
+    });
     document = await loadingTask.promise;
   } catch (err) {
     throw new Error(`Failed to parse PDF "${absPath}": ${(err as Error).message}`);
