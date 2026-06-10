@@ -1,3 +1,4 @@
+import * as path from 'path';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import type { PixelBuffer } from './types';
 
@@ -17,8 +18,65 @@ interface PureImage2DContext {
   [key: string]: unknown;
 }
 
+interface PureImageFont {
+  load(): Promise<void>;
+}
+
 interface PureImageModule {
   make(width: number, height: number): PureImageBitmap;
+  registerFont(filePath: string, family: string): PureImageFont;
+}
+
+// ---------------------------------------------------------------------------
+// Font registration — must run once before any render.
+// LiberationSans (Helvetica metric-compatible, Apache 2.0) ships inside
+// pdfjs-dist so no extra dependency is needed. We register it under every
+// common alias pdfjs may request so pureimage does not silently skip text.
+// ---------------------------------------------------------------------------
+let fontsRegistered = false;
+
+async function ensureFontsRegistered(): Promise<void> {
+  if (fontsRegistered) return;
+  fontsRegistered = true;
+
+  const stdFontsDir = path.join(
+    path.dirname(require.resolve('pdfjs-dist/package.json')),
+    'standard_fonts'
+  );
+
+  // Map every common PDF sans-serif font name to the LiberationSans TTFs
+  // that ship inside pdfjs-dist (Helvetica metric-compatible, Apache 2.0).
+  // pdfjs-dist standard_fonts only contains LiberationSans variants, so all
+  // sans-serif aliases point to the appropriate weight/style file.
+  const variants: Array<{ file: string; family: string }> = [
+    // Helvetica
+    { file: 'LiberationSans-Regular.ttf',    family: 'Helvetica'             },
+    { file: 'LiberationSans-Bold.ttf',        family: 'Helvetica-Bold'        },
+    { file: 'LiberationSans-Italic.ttf',      family: 'Helvetica-Oblique'     },
+    { file: 'LiberationSans-BoldItalic.ttf',  family: 'Helvetica-BoldOblique' },
+    // Arial (common substitute name used in some PDFs)
+    { file: 'LiberationSans-Regular.ttf',    family: 'Arial'                 },
+    { file: 'LiberationSans-Bold.ttf',        family: 'Arial-Bold'            },
+    { file: 'LiberationSans-Italic.ttf',      family: 'Arial-Italic'          },
+    { file: 'LiberationSans-BoldItalic.ttf',  family: 'Arial-BoldItalic'      },
+    // LiberationSans (direct name — pureimage may request it explicitly)
+    { file: 'LiberationSans-Regular.ttf',    family: 'LiberationSans'        },
+    { file: 'LiberationSans-Bold.ttf',        family: 'LiberationSans-Bold'   },
+    { file: 'LiberationSans-Italic.ttf',      family: 'LiberationSans-Italic' },
+    { file: 'LiberationSans-BoldItalic.ttf',  family: 'LiberationSans-BoldItalic' },
+    // sans-serif generic (browser/pureimage fallback family name)
+    { file: 'LiberationSans-Regular.ttf',    family: 'sans-serif'            },
+  ];
+
+  for (const { file, family } of variants) {
+    try {
+      const fnt = PImage.registerFont(path.join(stdFontsDir, file), family);
+      await fnt.load();
+    } catch {
+      // Non-fatal: if a font variant fails to load, pureimage falls back to its
+      // built-in Vera font. Text will still render, just with a different face.
+    }
+  }
 }
 
 /**
@@ -29,6 +87,11 @@ export async function renderPageToPixels(
   pageNumber: number,
   scale: number
 ): Promise<PixelBuffer> {
+  // Ensure Helvetica / Arial / LiberationSans fonts are registered with pureimage
+  // so pdfjs text operators (Tf/Tj/TJ) render correctly instead of falling back
+  // to pureimage's built-in bitmap font.
+  await ensureFontsRegistered();
+
   let page: PDFPageProxy;
   try {
     page = await document.getPage(pageNumber);
@@ -59,10 +122,38 @@ export async function renderPageToPixels(
     (ctxRaw['fillRect'] as (x: number, y: number, w: number, h: number) => void)(0, 0, width, height);
   }
 
-  // Render PDF page onto the canvas
+  // Patch canvas methods that pureimage does not implement but pdfjs calls.
+  // Missing methods cause silent render failures or thrown errors mid-page.
+  //
+  // setLineDash / getLineDash — used for dashed strokes; barcodes use solid
+  //   fills (rects) so a no-op is safe. Without this stub pdfjs throws when
+  //   it tries to save/restore the dash state around barcode stripes.
+  if (typeof ctxRaw['setLineDash'] !== 'function') {
+    ctxRaw['setLineDash'] = () => { /* no-op: pureimage renders all strokes solid */ };
+    ctxRaw['getLineDash'] = () => [];
+  }
+  // createImageData — pdfjs uses this to blit decoded image XObjects (JPEG2000,
+  //   JBIG2, etc.) that can appear inside barcode capture areas.
+  if (typeof ctxRaw['createImageData'] !== 'function') {
+    ctxRaw['createImageData'] = (w: number, h: number) => ({
+      width: w,
+      height: h,
+      data: new Uint8ClampedArray(w * h * 4),
+    });
+  }
+  // createPattern — used for tiling patterns; a null return causes pdfjs to
+  //   skip the pattern fill gracefully rather than throwing.
+  if (typeof ctxRaw['createPattern'] !== 'function') {
+    ctxRaw['createPattern'] = () => null;
+  }
+
+  // Render PDF page onto the canvas.
+  // AnnotationMode.ENABLE_FORMS (2) ensures AcroForm barcode fields and other
+  // form annotations are rendered into the canvas (not just page content stream).
   const renderTask = page.render({
     canvasContext: context as unknown as CanvasRenderingContext2D,
     viewport,
+    annotationMode: 2, // AnnotationMode.ENABLE_FORMS
   });
 
   try {

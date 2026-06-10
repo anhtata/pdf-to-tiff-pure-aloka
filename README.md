@@ -125,7 +125,7 @@ Converts every page of a PDF file into individual TIFF files.
 
 ```ts
 interface ConversionOptions {
-  scale?: number;             // Default: 1.5
+  scale?: number;             // Default: 3.0
   compression?: TiffCompression; // Default: 'lzw'
   filePrefix?: string;        // Default: 'page'
 }
@@ -135,7 +135,7 @@ type TiffCompression = 'none' | 'packbits' | 'lzw';
 
 | Option        | Type              | Default    | Description |
 |---------------|-------------------|------------|-------------|
-| `scale`       | `number`          | `1.5`      | Render scale multiplier. `1.0` = 72 DPI (PDF native), `2.0` = 144 DPI, `4.17` ≈ 300 DPI. Valid range: `(0, 10]`. |
+| `scale`       | `number`          | `3.0`      | Render scale multiplier. `1.0` = 72 DPI (PDF native), `2.0` = 144 DPI, `3.0` ≈ 216 DPI (**default**), `4.17` ≈ 300 DPI. Valid range: `(0, 10]`. |
 | `compression` | `TiffCompression` | `'lzw'`    | TIFF compression algorithm. See [Compression Modes](#compression-modes). |
 | `filePrefix`  | `string`          | `'page'`   | Output filename prefix. **Single-page PDFs:** files are named `${prefix}.tiff` (no page number). **Multi-page PDFs:** files are named `${prefix}-${pageNumber}.tiff`. |
 

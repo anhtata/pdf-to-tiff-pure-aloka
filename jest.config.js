@@ -15,5 +15,5 @@ module.exports = {
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov'],
-  testTimeout: 60000
+  testTimeout: 300000 // 5 min — scale=3.0 renders large canvases; multi-page PDFs need extra time
 };

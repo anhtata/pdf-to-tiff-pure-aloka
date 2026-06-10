@@ -5,7 +5,7 @@ import { renderPageToPixels } from './canvas-renderer';
 import { encodeToTiff } from './tiff-encoder';
 import type { ConversionOptions, ConversionResult } from './types';
 
-const DEFAULT_SCALE = 1.5;
+const DEFAULT_SCALE = 3.0; // ~216 DPI — sharper default for document scanning
 const DEFAULT_COMPRESSION = 'lzw';
 const DEFAULT_PREFIX = 'page';
 
