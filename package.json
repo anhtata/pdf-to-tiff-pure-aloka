@@ -1,6 +1,6 @@
 {
   "name": "pdf-to-tiff-pure-aloka",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Pure Node.js PDF to TIFF converter — no system dependencies, no native bindings. Uses pdfjs-dist + pureimage + utif.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -16,7 +16,7 @@
     "prebuild": "npm run clean",
     "test": "jest --runInBand",
     "test:coverage": "jest --runInBand --coverage",
-    "lint": "eslint src/**/*.ts test/**/*.ts",
+    "lint": "eslint src/ test/",
     "prepublishOnly": "npm run lint && npm run build && npm test"
   },
   "keywords": [
@@ -49,9 +49,9 @@
     "@types/jest": "^29.5.12",
     "@types/node": "^20.14.0",
     "@types/utif": "^3.0.4",
-    "@typescript-eslint/eslint-plugin": "^7.13.0",
-    "@typescript-eslint/parser": "^7.13.0",
-    "eslint": "^8.57.0",
+    "@typescript-eslint/eslint-plugin": "^8.61.0",
+    "@typescript-eslint/parser": "^8.61.0",
+    "eslint": "^9.39.4",
     "jest": "^29.7.0",
     "rimraf": "^5.0.7",
     "ts-jest": "^29.1.5",

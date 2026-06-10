@@ -16,6 +16,7 @@
  */
 
 export { convertPdfToTiff } from './converter';
+export { convertPdfToText } from './pdf-text-extractor';
 export type {
   ConversionOptions,
   ConversionResult,

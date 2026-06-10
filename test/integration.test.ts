@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { convertPdfToTiff } from '../src/converter';
 
-const SAMPLE_PDF  = path.join(__dirname, 'samples', 'sample.pdf');
+const SAMPLE_PDF  = path.join(__dirname, 'samples', 'coversheet_sample.pdf');
+const MULTI_PAGE_PDF = path.join(__dirname, 'samples', 'sample.pdf');
 const OUTPUT_DIR  = path.join(__dirname, 'output');
 
 /** Builds a minimal valid single-page PDF and writes it to a temp file. Returns the file path. */
@@ -56,7 +57,7 @@ describe('convertPdfToTiff — integration', () => {
   }, 120_000);
 
   it('multi-page: default output filenames follow pattern page-N.tiff', async () => {
-    const result = await convertPdfToTiff(SAMPLE_PDF, OUTPUT_DIR);
+    const result = await convertPdfToTiff(MULTI_PAGE_PDF, OUTPUT_DIR);
 
     expect(result.totalPages).toBeGreaterThan(1);
     result.outputFiles.forEach((filePath, idx) => {
@@ -80,7 +81,7 @@ describe('convertPdfToTiff — integration', () => {
   }, 120_000);
 
   it('multi-page: respects custom filePrefix option', async () => {
-    const result = await convertPdfToTiff(SAMPLE_PDF, OUTPUT_DIR, { filePrefix: 'doc' });
+    const result = await convertPdfToTiff(MULTI_PAGE_PDF, OUTPUT_DIR, { filePrefix: 'doc' });
 
     expect(result.totalPages).toBeGreaterThan(1);
     result.outputFiles.forEach((filePath, idx) => {
@@ -110,13 +111,39 @@ describe('convertPdfToTiff — integration', () => {
       expect(result.outputFiles.length).toBeGreaterThanOrEqual(1);
       // clean up sub directory
       result.outputFiles.forEach((f) => fs.unlinkSync(f));
-      fs.rmdirSync(subDir, { recursive: true });
+      fs.rmSync(subDir, { recursive: true });
     }
   }, 300_000);
 
+  it('single-page coversheet: TIFF contains non-white pixel content (not blank)', async () => {
+    // Use compression:'none' to rule out any decompression issue — raw pixels only
+    const result = await convertPdfToTiff(SAMPLE_PDF, OUTPUT_DIR, { compression: 'none' });
+    expect(result.success).toBe(true);
+    expect(result.outputFiles).toHaveLength(1);
+
+    const tiffBuf = fs.readFileSync(result.outputFiles[0]);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const UTIF = require('utif') as typeof import('utif');
+    const ifds = UTIF.decode(tiffBuf);
+    UTIF.decodeImage(tiffBuf, ifds[0]);
+    const rgba = UTIF.toRGBA8(ifds[0]);
+
+    // Count pixels that are noticeably darker than white (real ink/content).
+    // Threshold < 200 avoids false-positives from JPEG/anti-aliasing artefacts,
+    // and also catches all-black images (would score 0 non-white-ish pixels).
+    // A real coversheet should have at least 100 such content pixels.
+    let contentPixels = 0;
+    for (let i = 0; i < rgba.length; i += 4) {
+      if (rgba[i] < 200 && rgba[i + 1] < 200 && rgba[i + 2] < 200) {
+        contentPixels++;
+      }
+    }
+    expect(contentPixels).toBeGreaterThan(100);
+  }, 120_000);
+
   it('creates output directory automatically if missing', async () => {
     const newDir = path.join(OUTPUT_DIR, 'auto-created');
-    if (fs.existsSync(newDir)) fs.rmdirSync(newDir, { recursive: true });
+    if (fs.existsSync(newDir)) fs.rmSync(newDir, { recursive: true });
 
     const result = await convertPdfToTiff(SAMPLE_PDF, newDir);
 
@@ -124,7 +151,7 @@ describe('convertPdfToTiff — integration', () => {
     expect(result.success).toBe(true);
     // cleanup
     result.outputFiles.forEach((f) => fs.unlinkSync(f));
-    fs.rmdirSync(newDir);
+    fs.rmSync(newDir, { recursive: true, force: true });
   }, 120_000);
 
   it('throws for a non-existent PDF path', async () => {

@@ -19,6 +19,7 @@
   - [convertPdfToTiff()](#convertpdftotiff)
   - [ConversionOptions](#conversionoptions)
   - [ConversionResult](#conversionresult)
+  - [convertPdfToText()](#convertpdfttotext)
 - [Examples](#examples)
 - [Compression Modes](#compression-modes)
 - [Known Limitations](#known-limitations)
@@ -33,6 +34,7 @@
 - ✅ **Three compression modes** — LZW, PackBits, or uncompressed
 - ✅ **TypeScript types included** — full `.d.ts` declarations shipped
 - ✅ **One TIFF per PDF page** — `page-1.tiff`, `page-2.tiff`, …
+- ✅ **PDF text extraction** — extract all text from a PDF as a plain string
 - ✅ **MIT License** — free for commercial and open-source use
 
 ---
@@ -59,9 +61,10 @@ npm install pdf-to-tiff-pure-aloka
 ## Quick Start
 
 ```js
-const { convertPdfToTiff } = require('pdf-to-tiff-pure-aloka');
+const { convertPdfToTiff, convertPdfToText } = require('pdf-to-tiff-pure-aloka');
 
 async function main() {
+  // Convert to TIFF
   const result = await convertPdfToTiff('document.pdf', './output');
 
   if (result.success) {
@@ -70,6 +73,10 @@ async function main() {
   } else {
     console.error('Conversion failed:', result.error);
   }
+
+  // Extract text
+  const text = await convertPdfToText('document.pdf');
+  console.log(text);
 }
 
 main();
@@ -77,7 +84,7 @@ main();
 
 **TypeScript:**
 ```ts
-import { convertPdfToTiff, ConversionOptions } from 'pdf-to-tiff-pure-aloka';
+import { convertPdfToTiff, convertPdfToText, ConversionOptions } from 'pdf-to-tiff-pure-aloka';
 
 const options: ConversionOptions = {
   scale: 2.0,
@@ -241,6 +248,28 @@ result.outputFiles.forEach(file => {
 });
 ```
 
+### Extract text from a PDF
+
+```js
+const { convertPdfToText } = require('pdf-to-tiff-pure-aloka');
+
+const text = await convertPdfToText('document.pdf');
+console.log(text);
+// Output: full text of all pages, pages separated by \n\n
+```
+
+**TypeScript:**
+```ts
+import { convertPdfToText } from 'pdf-to-tiff-pure-aloka';
+
+const text: string = await convertPdfToText('invoice.pdf');
+if (text.trim().length > 0) {
+  console.log('Extracted text:', text);
+} else {
+  console.log('No text found (image-only or encrypted PDF)');
+}
+```
+
 ---
 
 ## Compression Modes
@@ -252,6 +281,30 @@ result.outputFiles.forEach(file => {
 | `lzw`      | 5        | Smallest      | Moderate       | Storage, archival (**default**) |
 
 > **Tip:** For text-heavy or white-space-heavy documents, LZW achieves the best compression ratio. For photos or complex vector art, the difference between modes is smaller.
+
+---
+
+### `convertPdfToText()`
+
+```ts
+convertPdfToText(pdfPath: string): Promise<string>
+```
+
+Extracts all text content from a PDF file and returns it as a plain string.
+
+| Parameter | Type     | Required | Description |
+|-----------|----------|----------|-------------|
+| `pdfPath` | `string` | ✅ Yes   | Path to the source PDF file (absolute or relative) |
+
+**Returns** a `Promise<string>` — concatenated text of all pages, with pages separated by `\n\n`.
+
+**Returns an empty string** if the PDF contains no extractable text (image-only or rasterized content).
+
+**Throws** `Error` if:
+- The PDF file does not exist or cannot be read
+- The PDF is corrupt or has no pages
+
+> **Note:** Text extraction works on PDFs with embedded text streams. Scanned PDFs (images only) will return an empty string — use `convertPdfToTiff` to get image output and apply OCR separately if needed.
 
 ---
 
