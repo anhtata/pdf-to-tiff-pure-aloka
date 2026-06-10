@@ -1,6 +1,6 @@
 {
   "name": "pdf-to-tiff-pure-aloka",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Pure Node.js PDF to TIFF converter — no system dependencies, no native bindings. Uses pdfjs-dist + pureimage + utif.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

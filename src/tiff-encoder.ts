@@ -23,20 +23,29 @@ export function encodeToTiff(pixels: PixelBuffer, compression: TiffCompression):
 
   const raw = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 
+  // Strip alpha channel: convert RGBA → RGB (3 bytes per pixel).
+  // Many TIFF viewers mis-render RGBA with ExtraSamples as a blank/white image.
+  const rgb = new Uint8Array(width * height * 3);
+  for (let i = 0, j = 0; i < raw.length; i += 4, j += 3) {
+    rgb[j]     = raw[i];
+    rgb[j + 1] = raw[i + 1];
+    rgb[j + 2] = raw[i + 2];
+  }
+
   let imageData: Uint8Array;
   let compressionTag: number;
 
   switch (compression) {
     case 'none':
-      imageData = raw;
+      imageData = rgb;
       compressionTag = COMPRESSION_NONE;
       break;
     case 'packbits':
-      imageData = packbitsCompress(raw);
+      imageData = packbitsCompress(rgb);
       compressionTag = COMPRESSION_PACKBITS;
       break;
     case 'lzw':
-      imageData = lzwCompress(raw);
+      imageData = lzwCompress(rgb);
       compressionTag = COMPRESSION_LZW;
       break;
   }
@@ -49,7 +58,7 @@ export function encodeToTiff(pixels: PixelBuffer, compression: TiffCompression):
 // ---------------------------------------------------------------------------
 
 /**
- * Builds a valid TIFF file (little-endian, single strip, RGBA 8-bit) from
+ * Builds a valid TIFF file (little-endian, single strip, RGB 8-bit) from
  * compressed (or raw) image data.
  */
 function writeTiff(
@@ -63,15 +72,14 @@ function writeTiff(
   const ifd: Array<{ tag: number; type: number; values: number[] }> = [
     { tag: 256, type: 4, values: [width] },               // ImageWidth
     { tag: 257, type: 4, values: [height] },              // ImageLength
-    { tag: 258, type: 3, values: [8, 8, 8, 8] },          // BitsPerSample (RGBA)
+    { tag: 258, type: 3, values: [8, 8, 8] },             // BitsPerSample (RGB)
     { tag: 259, type: 3, values: [compression] },         // Compression
     { tag: 262, type: 3, values: [2] },                   // PhotometricInterpretation: RGB
     { tag: 273, type: 4, values: [0] },                   // StripOffsets (filled below)
-    { tag: 277, type: 3, values: [4] },                   // SamplesPerPixel: 4 (RGBA)
+    { tag: 277, type: 3, values: [3] },                   // SamplesPerPixel: 3 (RGB)
     { tag: 278, type: 4, values: [height] },              // RowsPerStrip: all rows
     { tag: 279, type: 4, values: [imageData.length] },    // StripByteCounts
     { tag: 284, type: 3, values: [1] },                   // PlanarConfiguration: chunky
-    { tag: 338, type: 3, values: [2] },                   // ExtraSamples: unassociated alpha
   ];
 
   const TYPE_BYTES: Record<number, number> = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8 };
