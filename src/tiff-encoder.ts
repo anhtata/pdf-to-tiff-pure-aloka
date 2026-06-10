@@ -23,13 +23,16 @@ export function encodeToTiff(pixels: PixelBuffer, compression: TiffCompression):
 
   const raw = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 
-  // Strip alpha channel: convert RGBA → RGB (3 bytes per pixel).
-  // Many TIFF viewers mis-render RGBA with ExtraSamples as a blank/white image.
+  // Alpha-composite RGBA against a white background, then extract RGB.
+  // pureimage initialises the canvas buffer to (R=0,G=0,B=0,A=0) — transparent black.
+  // Compositing over white ensures transparent regions become white (paper colour)
+  // rather than black, while fully-opaque content keeps its real colour.
   const rgb = new Uint8Array(width * height * 3);
   for (let i = 0, j = 0; i < raw.length; i += 4, j += 3) {
-    rgb[j]     = raw[i];
-    rgb[j + 1] = raw[i + 1];
-    rgb[j + 2] = raw[i + 2];
+    const a = raw[i + 3] / 255;                                       // normalise 0..1
+    rgb[j]     = Math.round(raw[i]     * a + 255 * (1 - a));          // R over white
+    rgb[j + 1] = Math.round(raw[i + 1] * a + 255 * (1 - a));          // G over white
+    rgb[j + 2] = Math.round(raw[i + 2] * a + 255 * (1 - a));          // B over white
   }
 
   let imageData: Uint8Array;
