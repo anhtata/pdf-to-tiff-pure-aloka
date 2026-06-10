@@ -80,6 +80,85 @@ async function ensureFontsRegistered(): Promise<void> {
 }
 
 /**
+ * Patches a pureimage 2D context with Canvas API methods that pdfjs-dist calls
+ * but pureimage does not implement. Applied to every canvas context — both the
+ * main page canvas and auxiliary canvases created by the CanvasFactory — so
+ * that pdfjs never throws on missing methods during image XObject decoding.
+ */
+function patchContext(ctx: Record<string, unknown>): void {
+  // setLineDash / getLineDash — used for dashed strokes; no-op is safe.
+  if (typeof ctx['setLineDash'] !== 'function') {
+    ctx['setLineDash'] = (): void => { /* no-op: pureimage renders all strokes solid */ };
+    ctx['getLineDash'] = (): number[] => [];
+  }
+  // createImageData — pdfjs uses this to blit decoded image XObjects (JPEG2000, JBIG2, etc.).
+  // Must return a real pureimage Bitmap so that pureimage's putImageData (which calls
+  // src.calculateIndex internally via _pasteSubBitmap) does not throw.
+  if (typeof ctx['createImageData'] !== 'function') {
+    ctx['createImageData'] = (w: number, h: number): PureImageBitmap => PImage.make(w || 1, h || 1);
+  }
+  // createPattern — used for tiling patterns; null causes pdfjs to skip gracefully.
+  if (typeof ctx['createPattern'] !== 'function') {
+    ctx['createPattern'] = (): null => null;
+  }
+  // getTransform — pureimage returns a plain object from asDomMatrix() that lacks DOMMatrix
+  // mutation methods. pdfjs calls .invertSelf() on the result to compute inverse transforms
+  // for coordinate mapping. Wrap getTransform so every returned object has invertSelf().
+  if (typeof ctx['getTransform'] === 'function') {
+    const origGetTransform = ctx['getTransform'] as () => Record<string, unknown>;
+    ctx['getTransform'] = function (): Record<string, unknown> {
+      const m = origGetTransform.call(ctx);
+      if (typeof m['invertSelf'] !== 'function') {
+        m['invertSelf'] = function (): Record<string, unknown> {
+          // Standard 2D affine inversion: matrix [a b c d e f]
+          const a = (m['a'] as number) ?? 1;
+          const b = (m['b'] as number) ?? 0;
+          const c = (m['c'] as number) ?? 0;
+          const d = (m['d'] as number) ?? 1;
+          const e = (m['e'] as number) ?? 0;
+          const f = (m['f'] as number) ?? 0;
+          const det = a * d - b * c;
+          if (det !== 0) {
+            m['a'] =  d / det;
+            m['b'] = -b / det;
+            m['c'] = -c / det;
+            m['d'] =  a / det;
+            m['e'] = (c * f - d * e) / det;
+            m['f'] = (b * e - a * f) / det;
+          }
+          return m;
+        };
+      }
+      return m;
+    };
+  }
+}
+
+/**
+ * A pureimage-backed CanvasFactory for pdfjs-dist.
+ * Pass this to `pdfjs.getDocument({ canvasFactory })` so that pdfjs never
+ * falls through to its default which tries to `require('canvas')`.
+ */
+export const pureImageCanvasFactory = {
+  create(w: number, h: number): { canvas: PureImageBitmap; context: unknown } {
+    const c = PImage.make(w || 1, h || 1);
+    const ctx = c.getContext('2d') as Record<string, unknown>;
+    patchContext(ctx);
+    return { canvas: c, context: ctx };
+  },
+  reset(canvasAndContext: { canvas: PureImageBitmap; context: unknown }, w: number, h: number): void {
+    canvasAndContext.canvas = PImage.make(w || 1, h || 1);
+    const ctx = canvasAndContext.canvas.getContext('2d') as Record<string, unknown>;
+    patchContext(ctx);
+    canvasAndContext.context = ctx;
+  },
+  destroy(canvasAndContext: { canvas: PureImageBitmap; context: unknown }): void{
+    canvasAndContext.canvas = PImage.make(1, 1);
+    canvasAndContext.context = null;
+  },
+};
+
+/**
  * Renders a single PDF page to an RGBA pixel buffer using pureimage as the Canvas backend.
  */
 export async function renderPageToPixels(
@@ -124,37 +203,44 @@ export async function renderPageToPixels(
 
   // Patch canvas methods that pureimage does not implement but pdfjs calls.
   // Missing methods cause silent render failures or thrown errors mid-page.
-  //
-  // setLineDash / getLineDash — used for dashed strokes; barcodes use solid
-  //   fills (rects) so a no-op is safe. Without this stub pdfjs throws when
-  //   it tries to save/restore the dash state around barcode stripes.
-  if (typeof ctxRaw['setLineDash'] !== 'function') {
-    ctxRaw['setLineDash'] = () => { /* no-op: pureimage renders all strokes solid */ };
-    ctxRaw['getLineDash'] = () => [];
-  }
-  // createImageData — pdfjs uses this to blit decoded image XObjects (JPEG2000,
-  //   JBIG2, etc.) that can appear inside barcode capture areas.
-  if (typeof ctxRaw['createImageData'] !== 'function') {
-    ctxRaw['createImageData'] = (w: number, h: number) => ({
-      width: w,
-      height: h,
-      data: new Uint8ClampedArray(w * h * 4),
-    });
-  }
-  // createPattern — used for tiling patterns; a null return causes pdfjs to
-  //   skip the pattern fill gracefully rather than throwing.
-  if (typeof ctxRaw['createPattern'] !== 'function') {
-    ctxRaw['createPattern'] = () => null;
-  }
+  patchContext(ctxRaw);
+
+  // Custom CanvasFactory backed by pureimage so pdfjs never tries to require()
+  // the native 'canvas' npm package when it needs to create auxiliary canvases
+  // (e.g. for image XObjects, patterns, or annotation layers).
+  // patchContext is applied to every auxiliary context so that pdfjs image
+  // XObject decoding (createImageData etc.) works on these canvases too.
+  const pureImageCanvasFactory = {
+    create(w: number, h: number): { canvas: PureImageBitmap; context: unknown } {
+      const c = PImage.make(w || 1, h || 1);
+      const ctx = c.getContext('2d') as Record<string, unknown>;
+      patchContext(ctx);
+      return { canvas: c, context: ctx };
+    },
+    reset(canvasAndContext: { canvas: PureImageBitmap; context: unknown }, w: number, h: number): void {
+      canvasAndContext.canvas = PImage.make(w || 1, h || 1);
+      const ctx = canvasAndContext.canvas.getContext('2d') as Record<string, unknown>;
+      patchContext(ctx);
+      canvasAndContext.context = ctx;
+    },
+    destroy(canvasAndContext: { canvas: PureImageBitmap; context: unknown }): void {
+      canvasAndContext.canvas = PImage.make(1, 1);
+      canvasAndContext.context = null;
+    },
+  };
 
   // Render PDF page onto the canvas.
   // AnnotationMode.ENABLE_FORMS (2) ensures AcroForm barcode fields and other
   // form annotations are rendered into the canvas (not just page content stream).
-  const renderTask = page.render({
-    canvasContext: context as unknown as CanvasRenderingContext2D,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderParams: any = {
+    canvasContext: context,
     viewport,
     annotationMode: 2, // AnnotationMode.ENABLE_FORMS
-  });
+    canvasFactory: pureImageCanvasFactory,
+  };
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+  const renderTask = page.render(renderParams);
 
   try {
     await renderTask.promise;

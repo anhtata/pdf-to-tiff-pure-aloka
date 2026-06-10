@@ -3,6 +3,7 @@ import * as path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import type { PdfMetadata, PageMetadata } from './types';
+import { pureImageCanvasFactory } from './canvas-renderer';
 
 // Install global polyfills BEFORE requiring pdfjs-dist.
 // pdfjs checks for DOMMatrix/Path2D at require-time; if they're already defined,
@@ -110,11 +111,13 @@ export async function loadPdf(pdfPath: string, scale: number): Promise<LoadedPdf
     const standardFontDataUrl = pathToFileURL(
       path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'standard_fonts') + path.sep
     ).href;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const loadingTask = pdfjs.getDocument({
       data,
       disableFontFace: true,
       standardFontDataUrl,
       StandardFontDataFactory: FsStandardFontDataFactory,
+      canvasFactory: pureImageCanvasFactory,
     });
     document = await loadingTask.promise;
   } catch (err) {
