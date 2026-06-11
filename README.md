@@ -32,6 +32,7 @@
 - ✅ **100% pure JavaScript / TypeScript** — no C++ bindings, no native add-ons
 - ✅ **No system dependencies** — no Ghostscript, Poppler, or ImageMagick required
 - ✅ **Three compression modes** — LZW, PackBits, or uncompressed
+- ✅ **Barcode-safe binarization** — Otsu adaptive threshold → crisp 1-bit black-and-white output
 - ✅ **TypeScript types included** — full `.d.ts` declarations shipped
 - ✅ **One TIFF per PDF page** — `page-1.tiff`, `page-2.tiff`, …
 - ✅ **PDF text extraction** — extract all text from a PDF as a plain string
@@ -135,6 +136,7 @@ interface ConversionOptions {
   scale?: number;             // Default: 3.0
   compression?: TiffCompression; // Default: 'lzw'
   filePrefix?: string;        // Default: 'page'
+  binarize?: boolean;         // Default: false
 }
 
 type TiffCompression = 'none' | 'packbits' | 'lzw';
@@ -145,6 +147,7 @@ type TiffCompression = 'none' | 'packbits' | 'lzw';
 | `scale`       | `number`          | `3.0`      | Render scale multiplier. `1.0` = 72 DPI (PDF native), `2.0` = 144 DPI, `3.0` ≈ 216 DPI (**default**), `4.17` ≈ 300 DPI. Valid range: `(0, 10]`. |
 | `compression` | `TiffCompression` | `'lzw'`    | TIFF compression algorithm. See [Compression Modes](#compression-modes). |
 | `filePrefix`  | `string`          | `'page'`   | Output filename prefix. **Single-page PDFs:** files are named `${prefix}.tiff` (no page number). **Multi-page PDFs:** files are named `${prefix}-${pageNumber}.tiff`. |
+| `binarize`    | `boolean`         | `false`    | When `true`, converts each page to **1-bit black-and-white** using Otsu's adaptive threshold before encoding. Eliminates the anti-aliased gray fringe that pureimage adds to barcode edges, making barcodes scannable by hardware readers and fax systems. Output IFD: `BitsPerSample=1`, `PhotometricInterpretation=0` (WhiteIsZero). |
 
 ---
 
@@ -207,6 +210,36 @@ const result = await convertPdfToTiff('report.pdf', './compressed', {
   compression: 'packbits',
 });
 ```
+
+### Barcode / fax-quality output (1-bit black-and-white)
+
+Use `binarize: true` when the PDF contains barcodes, QR codes, or must be sent to a fax system. The canvas renderer anti-aliases barcode edges, producing gray pixels that can confuse fixed-threshold hardware readers. Enabling binarization applies **Otsu's adaptive threshold** to remove all gray, writing a compact 1-bit TIFF instead of an 8-bit RGB one.
+
+```js
+const { convertPdfToTiff } = require('pdf-to-tiff-pure-aloka');
+
+const result = await convertPdfToTiff('barcode-invoice.pdf', './output', {
+  scale: 3.0,          // higher scale = more barcode detail
+  compression: 'lzw',
+  binarize: true,      // → 1-bit B&W TIFF, Otsu adaptive threshold
+});
+```
+
+**TypeScript:**
+```ts
+import { convertPdfToTiff, ConversionOptions } from 'pdf-to-tiff-pure-aloka';
+
+const options: ConversionOptions = {
+  scale: 3.0,
+  compression: 'lzw',
+  binarize: true,
+};
+
+const result = await convertPdfToTiff('barcode.pdf', './output', options);
+// Output TIFF: BitsPerSample=1, PhotometricInterpretation=0 (WhiteIsZero)
+```
+
+> **Tip:** For documents that mix barcodes with full-colour content (logos, photos), leave `binarize: false` (default) and use a separate post-processing step for the pages that need scanning.
 
 ### Error handling
 
@@ -316,8 +349,7 @@ Extracts all text content from a PDF file and returns it as a plain string.
 | **Font rendering** | PDFs that use unembedded proprietary fonts (e.g. old Vietnamese TCVN3 fonts) may render as empty boxes. Standard fonts (Helvetica, Times, Courier) require the `standardFontDataUrl` option of pdfjs-dist; this package uses best-effort fallback only. |
 | **Color accuracy** | Complex color spaces (CMYK, ICC profiles) are handled by pdfjs on a best-effort basis. Slight color shifts are possible. |
 | **Memory usage** | Very high-resolution renders (scale > 4.0) of large pages can use significant RAM. Process pages sequentially for large documents. |
-| **No multi-page TIFF** | Each page produces a separate `.tiff` file. Multi-page (strips) TIFF is not supported. |
-
+| **No multi-page TIFF** | Each page produces a separate `.tiff` file. Multi-page (strips) TIFF is not supported. || **Binarize on mixed pages** | `binarize: true` applies a single global Otsu threshold to the whole page. Pages with both full-colour photos and barcodes may lose colour detail. Use `binarize: false` (default) for colour output. |
 ---
 
 ## License

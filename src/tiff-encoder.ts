@@ -12,7 +12,7 @@ const COMPRESSION_PACKBITS = 32773;
  * @param pixels      - RGBA pixel buffer from the Canvas renderer
  * @param compression - Compression algorithm to apply
  */
-export function encodeToTiff(pixels: PixelBuffer, compression: TiffCompression): Buffer {
+export function encodeToTiff(pixels: PixelBuffer, compression: TiffCompression, binarize = false): Buffer {
   const { data, width, height } = pixels;
 
   if (data.length !== width * height * 4) {
@@ -33,6 +33,26 @@ export function encodeToTiff(pixels: PixelBuffer, compression: TiffCompression):
     rgb[j]     = Math.round(raw[i]     * a + 255 * (1 - a));          // R over white
     rgb[j + 1] = Math.round(raw[i + 1] * a + 255 * (1 - a));          // G over white
     rgb[j + 2] = Math.round(raw[i + 2] * a + 255 * (1 - a));          // B over white
+  }
+
+  // Binarize path: convert to 1-bit monochrome TIFF using Otsu's adaptive threshold.
+  if (binarize) {
+    const gray = toGrayscale(rgb);
+    const threshold = otsuThreshold(gray);
+    const packed = pack1bit(gray, width, height, threshold);
+    let monoData: Uint8Array = packed;
+    let monoCompressionTag: number = COMPRESSION_NONE;
+    switch (compression) {
+      case 'packbits':
+        monoData = packbitsCompress(packed);
+        monoCompressionTag = COMPRESSION_PACKBITS;
+        break;
+      case 'lzw':
+        monoData = lzwCompress(packed);
+        monoCompressionTag = COMPRESSION_LZW;
+        break;
+    }
+    return writeTiff(monoData, width, height, monoCompressionTag, true);
   }
 
   let imageData: Uint8Array;
@@ -68,11 +88,23 @@ function writeTiff(
   imageData: Uint8Array,
   width: number,
   height: number,
-  compression: number
+  compression: number,
+  isMono = false
 ): Buffer {
   // IFD tags — must be sorted ascending by tag number per TIFF 6.0 spec
   // Type constants: 3=SHORT (uint16), 4=LONG (uint32)
-  const ifd: Array<{ tag: number; type: number; values: number[] }> = [
+  const ifd: Array<{ tag: number; type: number; values: number[] }> = isMono ? [
+    { tag: 256, type: 4, values: [width] },               // ImageWidth
+    { tag: 257, type: 4, values: [height] },              // ImageLength
+    { tag: 258, type: 3, values: [1] },                   // BitsPerSample: 1
+    { tag: 259, type: 3, values: [compression] },         // Compression
+    { tag: 262, type: 3, values: [0] },                   // PhotometricInterpretation: WhiteIsZero
+    { tag: 273, type: 4, values: [0] },                   // StripOffsets (filled below)
+    { tag: 277, type: 3, values: [1] },                   // SamplesPerPixel: 1
+    { tag: 278, type: 4, values: [height] },              // RowsPerStrip: all rows
+    { tag: 279, type: 4, values: [imageData.length] },    // StripByteCounts
+    { tag: 284, type: 3, values: [1] },                   // PlanarConfiguration: chunky
+  ] : [
     { tag: 256, type: 4, values: [width] },               // ImageWidth
     { tag: 257, type: 4, values: [height] },              // ImageLength
     { tag: 258, type: 3, values: [8, 8, 8] },             // BitsPerSample (RGB)
@@ -167,6 +199,80 @@ function writeTiff(
   }
 
   return buf;
+}
+
+// ---------------------------------------------------------------------------
+// Image processing helpers for binarization
+// ---------------------------------------------------------------------------
+
+/** Converts RGB (3 bytes/pixel) to grayscale using the ITU-R BT.601 luma formula. */
+function toGrayscale(rgb: Uint8Array): Uint8Array {
+  const n = rgb.length / 3;
+  const gray = new Uint8Array(n);
+  for (let i = 0, j = 0; i < n; i++, j += 3) {
+    gray[i] = Math.round(0.299 * rgb[j] + 0.587 * rgb[j + 1] + 0.114 * rgb[j + 2]);
+  }
+  return gray;
+}
+
+/**
+ * Computes the optimal binarization threshold using Otsu's method.
+ * Maximises the between-class variance of the foreground/background pixel populations.
+ * Returns a value in [0, 255]; pixels strictly below it are "ink" (black).
+ */
+function otsuThreshold(gray: Uint8Array): number {
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
+
+  const total = gray.length;
+  let sumAll = 0;
+  for (let t = 0; t < 256; t++) sumAll += t * hist[t];
+
+  let sumB = 0;
+  let wB = 0;
+  let maxVar = 0;
+  let threshold = 128; // sensible default when histogram is degenerate
+
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (wB === 0) continue;
+    const wF = total - wB;
+    if (wF === 0) break;
+
+    sumB += t * hist[t];
+    const mB = sumB / wB;            // background mean
+    const mF = (sumAll - sumB) / wF; // foreground mean
+    const varBetween = wB * wF * (mB - mF) * (mB - mF);
+    if (varBetween > maxVar) {
+      maxVar = varBetween;
+      threshold = t;
+    }
+  }
+  return threshold;
+}
+
+/**
+ * Packs a grayscale buffer into a 1-bit-per-pixel array suitable for a monochrome TIFF.
+ *
+ * Encoding rules (TIFF 6.0 §6, FillOrder = 1):
+ *   - MSB-first within each byte
+ *   - Each row padded to a whole byte: stride = ceil(width / 8)
+ *   - PhotometricInterpretation = 0 (WhiteIsZero):
+ *       bit 1 → white (paper), bit 0 → black (ink)
+ *   - Pixel is white when gray ≥ threshold, black otherwise.
+ */
+function pack1bit(gray: Uint8Array, width: number, height: number, threshold: number): Uint8Array {
+  const rowStride = Math.ceil(width / 8);
+  const packed = new Uint8Array(height * rowStride); // zero-initialised → all black
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (gray[y * width + x] >= threshold) {
+        // White pixel → set the MSB-first bit for this column
+        packed[y * rowStride + (x >> 3)] |= 0x80 >> (x & 7);
+      }
+    }
+  }
+  return packed;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import { encodeToTiff } from '../src/tiff-encoder';
 import type { PixelBuffer, TiffCompression } from '../src/types';
+import * as UTIF from 'utif';
 
 /** Creates a minimal synthetic RGBA pixel buffer for testing */
 function makeSyntheticPixels(width = 4, height = 4): PixelBuffer {
@@ -50,5 +51,54 @@ describe('tiff-encoder', () => {
       height: 4,
     };
     expect(() => encodeToTiff(badPixels, 'lzw')).toThrow('Pixel buffer size mismatch');
+  });
+});
+
+describe('binarize option', () => {
+  /** Converts a Node.js Buffer to an ArrayBuffer for utif */
+  function bufToArrayBuffer(buf: Buffer): ArrayBuffer {
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+  }
+
+  /** Reads the first numeric value of a SHORT (Uint16) TIFF IFD tag */
+  function tagNum(ifd: UTIF.IFD, key: string): number {
+    return (ifd[key] as unknown as Uint16Array)[0];
+  }
+
+  const compressionModes: TiffCompression[] = ['none', 'packbits', 'lzw'];
+
+  compressionModes.forEach((mode) => {
+    it(`binarize=true with compression="${mode}" produces valid TIFF magic bytes`, () => {
+      const pixels = makeSyntheticPixels(8, 8);
+      const buf = encodeToTiff(pixels, mode, true);
+      expect(buf).toBeInstanceOf(Buffer);
+      expect(isTiffBuffer(buf)).toBe(true);
+    });
+  });
+
+  it('binarized output IFD has BitsPerSample=1, PhotometricInterpretation=0 (WhiteIsZero), SamplesPerPixel=1', () => {
+    const pixels = makeSyntheticPixels(16, 16);
+    const buf = encodeToTiff(pixels, 'none', true);
+    const ifds = UTIF.decode(bufToArrayBuffer(buf));
+    const ifd = ifds[0];
+    expect(tagNum(ifd, 't258')).toBe(1);  // BitsPerSample = 1
+    expect(tagNum(ifd, 't262')).toBe(0);  // PhotometricInterpretation: WhiteIsZero
+    expect(tagNum(ifd, 't277')).toBe(1);  // SamplesPerPixel = 1
+  });
+
+  it('1-bit mono output is smaller than 8-bit RGB output for the same image (no compression)', () => {
+    const pixels = makeSyntheticPixels(32, 32);
+    const colorSize = encodeToTiff(pixels, 'none', false).length;
+    const monoSize  = encodeToTiff(pixels, 'none', true).length;
+    expect(monoSize).toBeLessThan(colorSize);
+  });
+
+  it('binarize=false (default) still produces BitsPerSample=8 RGB output (non-regression)', () => {
+    const pixels = makeSyntheticPixels(16, 16);
+    const buf = encodeToTiff(pixels, 'none', false);
+    const ifds = UTIF.decode(bufToArrayBuffer(buf));
+    const ifd = ifds[0];
+    expect(tagNum(ifd, 't258')).toBe(8);  // BitsPerSample = 8
+    expect(tagNum(ifd, 't262')).toBe(2);  // PhotometricInterpretation: RGB
   });
 });

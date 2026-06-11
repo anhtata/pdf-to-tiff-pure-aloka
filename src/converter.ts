@@ -36,6 +36,7 @@ export async function convertPdfToTiff(
   const scale = options.scale ?? DEFAULT_SCALE;
   const compression = options.compression ?? DEFAULT_COMPRESSION;
   const prefix = options.filePrefix ?? DEFAULT_PREFIX;
+  const binarize: boolean = options.binarize ?? false;
 
   // Validate scale range
   if (scale <= 0 || scale > 10) {
@@ -64,7 +65,7 @@ export async function convertPdfToTiff(
       const pixels = await renderPageToPixels(document, i, scale);
 
       // Step 2: Encode RGBA buffer → TIFF binary
-      const tiffBuffer = encodeToTiff(pixels, compression);
+      const tiffBuffer = encodeToTiff(pixels, compression, binarize);
 
       // Step 3: Write TIFF to disk
       fs.writeFileSync(outputPath, tiffBuffer);

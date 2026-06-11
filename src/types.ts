@@ -34,6 +34,14 @@ export interface ConversionOptions {
    * Default: 'page'
    */
   filePrefix?: string;
+
+  /**
+   * When true, each page is binarized (converted to 1-bit black-and-white) using
+   * Otsu's adaptive thresholding before encoding. This eliminates anti-aliased gray
+   * pixels produced by the canvas renderer and produces crisp, scannable barcodes.
+   * Default: false (output is 8-bit RGB colour TIFF)
+   */
+  binarize?: boolean;
 }
 
 /**
