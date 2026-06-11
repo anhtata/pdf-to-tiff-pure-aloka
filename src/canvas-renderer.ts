@@ -185,6 +185,7 @@ export async function renderPageToPixels(
   // Create a pure-JS canvas of the required size
   const canvas: PureImageBitmap = PImage.make(width, height);
   const context = canvas.getContext('2d');
+  context.imageSmoothingEnabled = false; // render at native resolution without blurring
 
   // Fill background with white before rendering (avoids transparent/black pages).
   // IMPORTANT: call beginPath() FIRST so that pureimage's internal path array
@@ -236,6 +237,7 @@ export async function renderPageToPixels(
   const renderParams: any = {
     canvasContext: context,
     viewport,
+    intent: 'print', // highest quality rendering (e.g. for thin lines)
     annotationMode: 2, // AnnotationMode.ENABLE_FORMS
     canvasFactory: pureImageCanvasFactory,
   };
